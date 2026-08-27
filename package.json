@@ -1,0 +1,19 @@
+{
+  "name": "civic-search",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Connected knowledge search: topics you care about, articles to read, bills in your locale, and people you should know.",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "check": "node scripts/check-providers.mjs"
+  },
+  "engines": {
+    "node": ">=20.6"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}

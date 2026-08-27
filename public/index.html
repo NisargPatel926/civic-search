@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>The Civic Brief — issues, bills, and the people who decide them</title>
+<meta name="description" content="Pick the issues you care about and your address. Get the reporting to read, the bills moving now, the laws already on the books, and the officials to contact — mapped as one connected graph." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Spectral:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,600&family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/styles.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📰</text></svg>" />
+</head>
+<body>
+<a class="skip-link" href="#brief">Skip to your brief</a>
+
+<header class="masthead">
+  <div class="masthead__rule masthead__rule--top"></div>
+  <div class="masthead__inner">
+    <p class="masthead__kicker">Civic Search</p>
+    <h1 class="masthead__title">The Civic Brief</h1>
+    <p class="masthead__standfirst">The issues you follow, the laws they turn into, and the people you can call about them.</p>
+  </div>
+  <div class="masthead__meta">
+    <span id="masthead-date"></span>
+    <span class="masthead__meta-sep">·</span>
+    <span id="masthead-place">No address yet</span>
+    <span class="masthead__meta-sep">·</span>
+    <span id="masthead-sources">Sample edition</span>
+  </div>
+  <div class="masthead__rule"></div>
+</header>
+
+<main>
+  <section class="query" aria-labelledby="query-heading">
+    <h2 class="query__heading" id="query-heading">What do you want to track?</h2>
+
+    <form id="query-form" class="query__form" autocomplete="off">
+      <fieldset class="field field--topics">
+        <legend class="field__label">Topics <span class="field__hint">choose up to five</span></legend>
+        <div class="chips" id="topic-chips" role="group" aria-label="Topics"></div>
+      </fieldset>
+
+      <div class="query__row">
+        <div class="field field--address">
+          <label class="field__label" for="address">Your address</label>
+          <input
+            class="input"
+            id="address"
+            name="address"
+            type="text"
+            placeholder="1200 Congress Ave, Austin, TX 78701"
+            spellcheck="false"
+          />
+          <p class="field__note">Used once, to find your districts. Nothing is stored on the server.</p>
+        </div>
+
+        <div class="field field--dates">
+          <label class="field__label" for="range-preset">Article date range</label>
+          <div class="daterange">
+            <select class="input select" id="range-preset" name="range">
+              <option value="7">Past week</option>
+              <option value="30" selected>Past 30 days</option>
+              <option value="90">Past 3 months</option>
+              <option value="365">Past year</option>
+              <option value="custom">Custom…</option>
+            </select>
+            <div class="daterange__custom" id="range-custom" hidden>
+              <label class="visually-hidden" for="date-from">From</label>
+              <input class="input" type="date" id="date-from" name="from" />
+              <span class="daterange__dash">to</span>
+              <label class="visually-hidden" for="date-to">To</label>
+              <input class="input" type="date" id="date-to" name="to" />
+            </div>
+          </div>
+          <p class="field__note" id="range-note"></p>
+        </div>
+
+        <div class="field field--submit">
+          <button class="button" type="submit" id="explore">Explore</button>
+        </div>
+      </div>
+    </form>
+  </section>
+
+  <section class="results" id="brief" aria-live="polite">
+    <div class="results__bar">
+      <div class="results__title-group">
+        <h2 class="results__title" id="results-title">Pick your issues to begin</h2>
+        <span class="badge" id="results-place" hidden></span>
+      </div>
+      <div class="scopes" id="scope-tabs" role="tablist" aria-label="Level of government"></div>
+    </div>
+    <p class="results__hint" id="scope-hint">The map and the columns below update together.</p>
+
+    <div class="notices" id="notices" hidden></div>
+
+    <div class="layout">
+      <aside class="map-panel" aria-labelledby="map-heading">
+        <div class="panel">
+          <div class="panel__head">
+            <h3 class="panel__title" id="map-heading">Relationship map</h3>
+            <span class="panel__hint" id="map-hint">Hover to preview · click to pin</span>
+          </div>
+
+          <div class="focus-switch" id="focus-switch" hidden></div>
+
+          <div class="graph" id="graph">
+            <svg id="graph-svg" viewBox="0 0 760 640" role="img" aria-labelledby="graph-title">
+              <title id="graph-title">Map of your issues and the articles, bills, laws, and officials attached to them</title>
+              <defs>
+                <filter id="nodeShadow" x="-60%" y="-60%" width="220%" height="220%">
+                  <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#3b3323" flood-opacity="0.18" />
+                </filter>
+                <radialGradient id="coreGlow" cx="50%" cy="42%" r="72%">
+                  <stop offset="0%" stop-color="#9a3b26" />
+                  <stop offset="100%" stop-color="#6d2417" />
+                </radialGradient>
+              </defs>
+              <g id="graph-edges"></g>
+              <g id="graph-nodes"></g>
+            </svg>
+            <div class="graph__labels" id="graph-labels"></div>
+          </div>
+
+          <div class="legend" id="legend"></div>
+        </div>
+      </aside>
+
+      <div class="feed" id="feed"></div>
+    </div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="footer__rule"></div>
+  <p>
+    Articles via <a href="https://newsapi.org" rel="noopener">NewsAPI</a> · federal legislation via
+    <a href="https://api.congress.gov" rel="noopener">Congress.gov</a> · state legislation and legislators via
+    <a href="https://open.pluralpolicy.com" rel="noopener">Open States</a> · districts via the
+    <a href="https://geocoding.geo.census.gov" rel="noopener">Census geocoder</a> · members of Congress via
+    <a href="https://github.com/unitedstates/congress-legislators" rel="noopener">@unitedstates</a>.
+  </p>
+  <p class="footer__note">Rows marked <span class="tag tag--sample">Sample</span> are placeholders, not reporting. Verify anything before you act on it.</p>
+</footer>
+
+<template id="tpl-section">
+  <section class="feed__section">
+    <div class="feed__head">
+      <h3 class="feed__title"></h3>
+      <span class="feed__count"></span>
+    </div>
+    <div class="feed__cards"></div>
+  </section>
+</template>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>
