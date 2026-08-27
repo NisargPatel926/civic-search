@@ -45,6 +45,14 @@ async function fetchCongressList(path, params) {
   return cached(cacheKey, () => fetchJson('Congress.gov', url));
 }
 
+/** 119 -> "119th", 121 -> "121st" — congress.gov URLs use the ordinal. */
+function ordinal(n) {
+  const num = Number(n);
+  const rem100 = num % 100;
+  if (rem100 >= 11 && rem100 <= 13) return `${num}th`;
+  return `${num}${{ 1: 'st', 2: 'nd', 3: 'rd' }[num % 10] || 'th'}`;
+}
+
 function normalizeFederalBill(bill, topic, { law = false } = {}) {
   const action = bill.latestAction?.text || '';
   const stage = law ? 'enacted' : stageFrom(action);
@@ -61,7 +69,7 @@ function normalizeFederalBill(bill, topic, { law = false } = {}) {
     sponsor: bill.sponsors?.[0]?.fullName || null,
     date: bill.latestAction?.actionDate || bill.updateDate || null,
     citation: law && bill.laws?.[0] ? `${bill.laws[0].type} ${bill.laws[0].number}` : null,
-    url: `https://www.congress.gov/bill/${bill.congress}th-congress/${
+    url: `https://www.congress.gov/bill/${ordinal(bill.congress)}-congress/${
       bill.type?.toLowerCase().startsWith('h') ? 'house-bill' : 'senate-bill'
     }/${bill.number}`,
     sample: false
@@ -76,7 +84,7 @@ export async function fetchFederalLegislation(topics, { limit = 6 } = {}) {
   const notices = [];
   try {
     const [recent, laws] = await Promise.all([
-      fetchCongressList(`/bill/${congress}`, { sort: 'updateDate+desc', limit: 250 }),
+      fetchCongressList(`/bill/${congress}`, { sort: 'updateDate desc', limit: 250 }),
       fetchCongressList(`/law/${congress}`, { limit: 100 }).catch(() => null)
     ]);
 

@@ -45,9 +45,33 @@ Two more sources need no key and are always live: the **Census geocoder**
 **@unitedstates congress-legislators** dataset (every sitting member of
 Congress, with phone, office, contact form, and photo).
 
+Check them all at once:
+
+```bash
+npm run check                                   # uses a default address + topic
+npm run check -- "350 5th Ave, New York, NY" housing
+```
+
+It prints a pass/fail line per provider with the first record it parsed, so a
+wrong key, a blocked host, or a changed upstream field is obvious before you go
+hunting through the UI.
+
 Keys are read once at boot from the environment. They are never sent to the
 browser — the front end only ever talks to this server, and `/api/topics`
 reports which providers are live so the page can say so honestly.
+
+### Running in a sandboxed environment
+
+If you run this somewhere with an egress allowlist (Claude Code on the web, CI,
+a locked-down container), these hosts need to be reachable or every column falls
+back to sample rows:
+
+```
+newsapi.org                 api.congress.gov         v3.openstates.org
+geocoding.geo.census.gov    unitedstates.github.io   theunitedstates.io
+```
+
+The last one serves member photos and is fetched by the browser, not the server.
 
 ## What the reader gets
 
