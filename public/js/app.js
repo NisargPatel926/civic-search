@@ -1,5 +1,5 @@
 import { getTopics, getBrief } from './api.js';
-import { buildGraph, renderGraph, LEGEND, PALETTE } from './graph.js';
+import { buildGraph, renderForceGraph, LEGEND, PALETTE } from './graph.js';
 
 const DAY = 86400000;
 const MAX_TOPICS = 5;
@@ -18,8 +18,8 @@ const state = {
   preset: '30',
   scope: 'all',
   focusTopicId: null,
-  activeId: null,
-  hoveredId: null,
+  pinnedNode: null,   // currently pinned node object (or null)
+  hoveredNode: null,  // currently hovered node (not pinned)
   brief: null,
   loading: false
 };
@@ -37,50 +37,68 @@ const els = {
   title: $('#results-title'),
   place: $('#results-place'),
   scopeTabs: $('#scope-tabs'),
-  scopeHint: $('#scope-hint'),
   notices: $('#notices'),
   focusSwitch: $('#focus-switch'),
-  feed: $('#feed'),
+  graphCanvas: $('#graph-canvas'),
+  graphHint: $('#graph-hint'),
   legend: $('#legend'),
-  mapHint: $('#map-hint'),
-  graph: {
-    edgeLayer: $('#graph-edges'),
-    nodeLayer: $('#graph-nodes'),
-    labelLayer: $('#graph-labels')
-  },
+  // Detail panel
+  detailPanel: $('#detail-panel'),
+  detailKind: $('#detail-kind'),
+  detailTitle: $('#detail-title'),
+  detailBody: $('#detail-body'),
+  detailPinHint: $('#detail-pin-hint'),
   mastheadDate: $('#masthead-date'),
   mastheadPlace: $('#masthead-place'),
-  mastheadSources: $('#masthead-sources')
+  mastheadSources: $('#masthead-sources'),
+  // Spacing + zoom controls
+  spacingBar: $('#graph-spacing-bar'),
+  spacingSlider: $('#spacing-slider'),
+  spacingValue: $('#spacing-value'),
+  zoomSlider: $('#zoom-slider'),
+  zoomValue: $('#zoom-value')
 };
 
 const SCOPES = [
-  { id: 'all', label: 'All levels', hint: 'Everything we found, from Congress down to city hall.' },
-  { id: 'federal', label: 'National', hint: 'Federal bills, laws, and members of Congress.' },
-  { id: 'state', label: 'State', hint: 'State legislature bills and your state legislators.' },
-  { id: 'local', label: 'Local', hint: 'City and county officials and any local measures we can reach.' }
+  { id: 'all',     label: 'All levels',  hint: 'Everything we found, from Congress down to city hall.' },
+  { id: 'federal', label: 'National',    hint: 'Federal bills, laws, and members of Congress.' },
+  { id: 'state',   label: 'State',       hint: 'State legislature bills and your state legislators.' },
+  { id: 'local',   label: 'Local',       hint: 'City and county officials and any local measures we can reach.' }
 ];
 
 const STAGE = {
-  introduced: { label: 'Introduced', cls: 'tag--progress' },
-  committee: { label: 'In committee', cls: 'tag--progress' },
-  passedChamber: { label: 'Passed one chamber', cls: 'tag--progress' },
-  passedBoth: { label: 'Passed both chambers', cls: 'tag--passed' },
-  enacted: { label: 'Enacted', cls: 'tag--passed' },
-  sample: { label: 'Sample', cls: 'tag--sample' }
+  introduced:    { label: 'Introduced',            cls: 'tag--progress' },
+  committee:     { label: 'In committee',          cls: 'tag--progress' },
+  passedChamber: { label: 'Passed one chamber',    cls: 'tag--progress' },
+  passedBoth:    { label: 'Passed both chambers',  cls: 'tag--passed' },
+  enacted:       { label: 'Enacted',               cls: 'tag--passed' },
+  sample:        { label: 'Sample',                cls: 'tag--sample' }
 };
 
 const LEVEL = { federal: 'Federal', state: 'State', local: 'Local' };
 
-/* ------------------------------- utilities ------------------------------- */
+const KIND_LABEL = {
+  issue:    'Issue',
+  article:  'Article',
+  bill:     'Bill',
+  law:      'Law',
+  official: 'Person',
+  topic:    'Connected issue'
+};
+
+/* ─────────────── Utilities ─────────────── */
 
 const escapeHtml = (value) =>
-  String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  String(value ?? '').replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 function formatDate(value, { long = false } = {}) {
   if (!value) return null;
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return String(value);
-  return d.toLocaleDateString('en-US', long ? { year: 'numeric', month: 'long', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' });
+  return d.toLocaleDateString('en-US', long
+    ? { year: 'numeric', month: 'long', day: 'numeric' }
+    : { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 function relativeDays(value) {
@@ -94,16 +112,13 @@ function relativeDays(value) {
   return `${Math.round(days / 365)} years ago`;
 }
 
-/* --------------------------------- query --------------------------------- */
+/* ─────────────── URL / storage ─────────────── */
 
 function readUrlState() {
   const params = new URLSearchParams(location.search);
   const stored = (() => {
-    try {
-      return JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
-    } catch {
-      return null;
-    }
+    try { return JSON.parse(localStorage.getItem(STORE_KEY) || 'null'); }
+    catch { return null; }
   })();
   const source = params.has('topics') ? Object.fromEntries(params) : stored || {};
   if (source.topics) state.selected = String(source.topics).split(',').filter(Boolean).slice(0, MAX_TOPICS);
@@ -123,11 +138,7 @@ function persist() {
     preset: state.preset,
     scope: state.scope
   };
-  try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(payload));
-  } catch {
-    /* private mode */
-  }
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(payload)); } catch { /* private mode */ }
   const params = new URLSearchParams();
   if (payload.topics) params.set('topics', payload.topics);
   if (payload.address) params.set('address', payload.address);
@@ -135,6 +146,8 @@ function persist() {
   params.set('to', payload.to);
   history.replaceState(null, '', `${location.pathname}?${params.toString()}`);
 }
+
+/* ─────────────── Date range ─────────────── */
 
 function applyPreset() {
   const value = els.preset.value;
@@ -158,7 +171,7 @@ function updateRangeNote() {
     : span;
 }
 
-/* --------------------------------- chips --------------------------------- */
+/* ─────────────── Chips ─────────────── */
 
 function renderChips() {
   els.chips.replaceChildren();
@@ -178,16 +191,13 @@ function toggleTopic(id, { run = false } = {}) {
   const at = state.selected.indexOf(id);
   if (at >= 0) state.selected.splice(at, 1);
   else if (state.selected.length < MAX_TOPICS) state.selected.push(id);
-  else {
-    state.selected.shift();
-    state.selected.push(id);
-  }
+  else { state.selected.shift(); state.selected.push(id); }
   if (!state.selected.includes(state.focusTopicId)) state.focusTopicId = state.selected[0] || null;
   renderChips();
   if (run) submit();
 }
 
-/* -------------------------------- fetching -------------------------------- */
+/* ─────────────── Fetch ─────────────── */
 
 async function submit(event) {
   event?.preventDefault();
@@ -200,7 +210,6 @@ async function submit(event) {
 
   if (!state.selected.length) {
     els.title.textContent = 'Pick at least one topic to begin';
-    els.feed.innerHTML = '<p class="placeholder-note">Choose an issue above — add your address to pull in the bills and officials for your districts.</p>';
     return;
   }
 
@@ -208,13 +217,12 @@ async function submit(event) {
   state.loading = true;
   els.explore.disabled = true;
   els.explore.textContent = 'Reading…';
-  els.feed.classList.add('is-loading');
 
   try {
     const brief = await getBrief({ topics: state.selected, address: state.address, from: state.from, to: state.to });
     state.brief = brief;
-    state.activeId = null;
-    state.hoveredId = null;
+    state.pinnedNode = null;
+    state.hoveredNode = null;
     if (!brief.topics.some((t) => t.id === state.focusTopicId)) state.focusTopicId = brief.topics[0]?.id || null;
     render();
   } catch (err) {
@@ -224,11 +232,10 @@ async function submit(event) {
     state.loading = false;
     els.explore.disabled = false;
     els.explore.textContent = 'Explore';
-    els.feed.classList.remove('is-loading');
   }
 }
 
-/* -------------------------------- rendering -------------------------------- */
+/* ─────────────── Rendering ─────────────── */
 
 function render() {
   const brief = state.brief;
@@ -240,18 +247,20 @@ function render() {
   const place = brief.location?.label && brief.query.address ? brief.location.label : null;
   els.place.hidden = !place;
   if (place) {
-    const district = brief.location.congressionalDistrict ? ` · ${brief.location.stateAbbr}-${brief.location.congressionalDistrict}` : '';
+    const district = brief.location.congressionalDistrict
+      ? ` · ${brief.location.stateAbbr}-${brief.location.congressionalDistrict}` : '';
     els.place.textContent = `${place}${district}`;
   }
-  els.mastheadPlace.textContent = place ? `${place}` : 'No address yet';
+  els.mastheadPlace.textContent = place || 'No address yet';
   const live = Object.entries(brief.providers || {}).filter(([, on]) => on).map(([k]) => k);
   els.mastheadSources.textContent = live.length ? `Live: ${live.join(', ')}` : 'Sample edition';
 
   renderScopes();
   renderNotices(brief.notices);
   renderFocusSwitch();
-  renderMap();
-  renderFeed();
+  renderGraph();
+  renderLegend();
+  resetDetailPanel();
 }
 
 function renderScopes() {
@@ -265,27 +274,21 @@ function renderScopes() {
     tab.setAttribute('aria-selected', String(scope.id === state.scope));
     tab.addEventListener('click', () => {
       state.scope = scope.id;
-      state.activeId = null;
+      state.pinnedNode = null;
       persist();
       renderScopes();
-      renderMap();
-      renderFeed();
+      renderGraph();
+      resetDetailPanel();
     });
     els.scopeTabs.append(tab);
   }
-  els.scopeHint.textContent = SCOPES.find((s) => s.id === state.scope)?.hint || '';
 }
 
 function renderNotices(notices = []) {
-  if (!notices.length) {
-    els.notices.hidden = true;
-    els.notices.replaceChildren();
-    return;
-  }
+  if (!notices.length) { els.notices.hidden = true; els.notices.replaceChildren(); return; }
   els.notices.hidden = false;
   els.notices.innerHTML = `<p class="notices__title">About this data</p><ul>${notices
-    .map((n) => `<li>${escapeHtml(n)}</li>`)
-    .join('')}</ul>`;
+    .map((n) => `<li>${escapeHtml(n)}</li>`).join('')}</ul>`;
 }
 
 function renderFocusSwitch() {
@@ -301,253 +304,329 @@ function renderFocusSwitch() {
     btn.setAttribute('aria-pressed', String(topic.id === state.focusTopicId));
     btn.addEventListener('click', () => {
       state.focusTopicId = topic.id;
-      state.activeId = null;
+      state.pinnedNode = null;
       renderFocusSwitch();
-      renderMap();
-      renderFeed();
+      renderGraph();
+      resetDetailPanel();
     });
     els.focusSwitch.append(btn);
   }
 }
 
+/* ─────────────── Force graph ─────────────── */
+
 let graphCtl = null;
 
-function renderMap() {
-  const model = buildGraph(state.brief, { focusTopicId: state.focusTopicId, scope: state.scope });
+function renderGraph() {
+  if (!state.brief) return;
+  if (graphCtl) { graphCtl.destroy(); graphCtl = null; }
 
-  graphCtl = renderGraph(els.graph, model, {
-    onSelect: (node) => {
-      if (node.kind === 'topic') {
-        toggleTopic(node.id, { run: true });
-        return;
+  const model = buildGraph(state.brief, { scope: state.scope });
+
+  graphCtl = renderForceGraph(els.graphCanvas, model, {
+    onHover(node) {
+      state.hoveredNode = node;
+      if (!state.pinnedNode) {
+        if (node) updateDetailPanel(node, false);
+        else resetDetailPanel();
       }
-      focusItem(node.scrollTo || node.id);
+      updateHint();
     },
-    onHover: (node) => {
-      state.hoveredId = node?.id || null;
-      updateHighlight();
+    onPin(node) {
+      state.pinnedNode = node;
+      if (node) updateDetailPanel(node, true);
+      else resetDetailPanel();
+      updateHint();
     }
   });
 
-  renderLegend();
-  updateHighlight();
+  // Show the controls bar; restore sliders to their last-used values
+  els.spacingBar.removeAttribute('hidden');
+  const currentSpacingPct = parseInt(els.spacingSlider.value, 10);
+  els.spacingValue.textContent = `${currentSpacingPct}%`;
+  graphCtl.setSpacing(currentSpacingPct / 100);
+  // Reset zoom to 100% each time a new graph renders
+  els.zoomSlider.value = '100';
+  els.zoomValue.textContent = '100%';
+  graphCtl.setZoom(1);
 }
 
-/** Hover and pin only repaint attributes, never the SVG itself. */
-function updateHighlight() {
-  graphCtl?.setHighlight(state.hoveredId || state.activeId);
-  highlightCards();
-  els.mapHint.textContent = state.activeId ? 'Click another node to move the pin' : 'Hover to preview · click to pin';
+/* ─────────────── Spacing slider ─────────────── */
+
+function initSpacingSlider() {
+  els.spacingSlider.addEventListener('input', () => {
+    const pct = parseInt(els.spacingSlider.value, 10);
+    els.spacingValue.textContent = `${pct}%`;
+    if (graphCtl) graphCtl.setSpacing(pct / 100);
+  });
 }
+
+/* ─────────────── Zoom slider ─────────────── */
+
+function initZoomSlider() {
+  els.zoomSlider.addEventListener('input', () => {
+    const pct = parseInt(els.zoomSlider.value, 10);
+    els.zoomValue.textContent = `${pct}%`;
+    if (graphCtl) graphCtl.setZoom(pct / 100);
+  });
+}
+
+function updateHint() {
+  if (state.pinnedNode) {
+    els.graphHint.textContent = 'Click the same node again to unpin · or click background';
+  } else if (state.hoveredNode) {
+    els.graphHint.textContent = 'Click to pin · drag to move';
+  } else {
+    els.graphHint.textContent = 'Hover a node to preview · click to pin';
+  }
+}
+
+/* ─────────────── Legend ─────────────── */
 
 function renderLegend() {
   els.legend.replaceChildren();
   for (const item of LEGEND) {
     const wrap = document.createElement('div');
     wrap.className = 'legend__item';
-    wrap.innerHTML = `<svg class="legend__swatch" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7" fill="${item.fill}" stroke="${item.stroke}" stroke-width="2"${
-      item.dashed ? ' stroke-dasharray="3 2.5"' : ''
-    } /></svg><span>${escapeHtml(item.label)}</span>`;
+    wrap.setAttribute('role', 'listitem');
+    const swatch = document.createElement('span');
+    swatch.className = 'legend__swatch';
+    swatch.style.background = item.color;
+    if (item.dashed) {
+      swatch.style.background = 'none';
+      swatch.style.border = `2px dashed ${item.color}`;
+    }
+    const label = document.createElement('span');
+    label.textContent = item.label;
+    wrap.append(swatch, label);
     els.legend.append(wrap);
   }
 }
 
-/* ---------------------------------- feed ---------------------------------- */
+/* ─────────────── Detail panel ─────────────── */
 
-function currentSections() {
+function updateDetailPanel(node, isPinned) {
+  const item = node.item || {};
+  els.detailKind.textContent = KIND_LABEL[node.kind] || node.kind;
+  els.detailTitle.textContent = node.title || node.label;
+  els.detailBody.replaceChildren();
+  buildPanelBody(els.detailBody, node, item, isPinned);
+  els.detailPinHint.textContent = isPinned ? 'Pinned — click node again to unpin' : 'Click to pin';
+}
+
+function resetDetailPanel() {
+  els.detailKind.textContent = '';
+  els.detailTitle.textContent = '';
+  els.detailBody.innerHTML = '<p class="detail-panel__empty">Hover over any node to preview its content here. Click a node to pin the detail.</p>';
+  els.detailPinHint.textContent = '';
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   buildPanelBody — renders content sections directly into the panel.
+   On hover: shows a single-item preview.
+   On pin:   shows the full item + all connected sections.
+   ──────────────────────────────────────────────────────────────── */
+
+function buildPanelBody(container, node, item, isPinned) {
+  const e = escapeHtml;
   const brief = state.brief;
-  const focus = state.focusTopicId;
-  const inScope = (item) => state.scope === 'all' || item.level === state.scope;
-  const forTopic = (item) => !item.topicId || item.topicId === focus;
+  const scope = state.scope;
+  const inScope = (i) => scope === 'all' || i.level === scope;
 
-  return [
-    {
-      id: 'cat-articles',
-      title: 'Knowledge to review',
-      empty: 'No articles matched this topic and date range.',
-      items: brief.articles.filter(forTopic),
-      render: articleCard
-    },
-    {
-      id: 'cat-bills',
-      title: 'Bills in progress',
-      empty: 'No bills currently moving that we can see at this level.',
-      items: brief.bills.filter(forTopic).filter(inScope),
-      render: billCard
-    },
-    {
-      id: 'cat-laws',
-      title: 'Past legislation',
-      empty: 'No enacted legislation found at this level.',
-      items: brief.laws.filter(forTopic).filter(inScope),
-      render: billCard
-    },
-    {
-      id: 'cat-people',
-      title: 'People to contact',
-      empty: state.address ? 'No officials found for this level.' : 'Add your address to see who represents you.',
-      items: brief.officials.filter(inScope),
-      render: personCard
-    },
-    {
-      id: 'cat-topics',
-      title: 'Connected issues',
-      empty: 'No related issues in the taxonomy.',
-      items: brief.connections.related,
-      render: topicCard
-    }
-  ];
-}
+  // ── Issue hub ── show overview + all content grouped by type
+  if (node.kind === 'issue') {
+    container.innerHTML = `<p style="font-size:13px;color:var(--ink-soft);margin:0 0 14px">${e(item.blurb || '')}</p>`;
+    if (!isPinned) return;
 
-function renderFeed() {
-  els.feed.replaceChildren();
-  const tpl = document.getElementById('tpl-section');
+    const sections = [
+      { title: 'Articles',        items: brief.articles.filter(i => !i.topicId || i.topicId === item.id),  render: panelArticle },
+      { title: 'Bills',           items: brief.bills.filter(i => (!i.topicId || i.topicId === item.id) && inScope(i)), render: panelBill },
+      { title: 'Laws',            items: brief.laws.filter(i => (!i.topicId || i.topicId === item.id) && inScope(i)),  render: panelBill },
+      { title: 'People',          items: brief.officials.filter(inScope),  render: panelPerson },
+      { title: 'Connected issues',items: brief.connections.related,        render: panelTopic }
+    ].filter(s => s.items.length);
 
-  for (const section of currentSections()) {
-    const node = tpl.content.cloneNode(true);
-    const root = node.querySelector('.feed__section');
-    root.id = section.id;
-    node.querySelector('.feed__title').textContent = section.title;
-    node.querySelector('.feed__count').textContent = section.items.length ? `${section.items.length}` : '—';
-    const cards = node.querySelector('.feed__cards');
-
-    if (!section.items.length) {
-      const empty = document.createElement('p');
-      empty.className = 'empty';
-      empty.textContent = section.empty;
-      cards.append(empty);
-    } else {
-      for (const item of section.items) cards.append(section.render(item));
-    }
-    els.feed.append(node);
+    for (const sec of sections) appendPanelSection(container, sec.title, sec.items, sec.render);
+    return;
   }
-  highlightCards();
+
+  // ── Article ──
+  if (node.kind === 'article') {
+    const when = item.publishedAt
+      ? `${formatDate(item.publishedAt)} · ${relativeDays(item.publishedAt)}` : 'Undated';
+    container.innerHTML = `
+      <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 8px">${e(item.summary || item.title || '')}</p>
+      <p style="font-size:11.5px;font-style:italic;color:var(--ink-faint);margin:0 0 10px">${e(when)}${item.author ? ` · ${e(item.author)}` : ''}</p>
+      ${item.url ? `<a class="pcard__link" href="${e(item.url)}" target="_blank" rel="noopener">Read full article →</a>` : ''}
+    `;
+    return;
+  }
+
+  // ── Bill or Law ──
+  if (node.kind === 'bill' || node.kind === 'law') {
+    const stage = STAGE[item.stage] || STAGE.introduced;
+    const meta = [item.sponsor, item.citation, item.date ? formatDate(item.date, { long: true }) : null]
+      .filter(Boolean).join(' · ');
+    container.innerHTML = `
+      <p style="margin:0 0 6px"><span class="tag ${stage.cls}">${e(stage.label)}</span>
+        <span class="tag tag--level" style="margin-left:4px">${e(LEVEL[item.level] || item.level || '')}</span></p>
+      <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 8px">${e(item.summary || '')}</p>
+      ${meta ? `<p style="font-size:11.5px;font-style:italic;color:var(--ink-faint);margin:0 0 10px">${e(meta)}</p>` : ''}
+      ${item.url ? `<a class="pcard__link" href="${e(item.url)}" target="_blank" rel="noopener">View bill →</a>` : ''}
+    `;
+    return;
+  }
+
+  // ── Official ──
+  if (node.kind === 'official') {
+    const actions = [
+      item.email       ? { label: 'Email',       href: `mailto:${e(item.email)}` } : null,
+      item.contactForm ? { label: 'Contact form',href: e(item.contactForm) }        : null,
+      item.phone       ? { label: e(String(item.phone)), href: `tel:${e(String(item.phone).replace(/[^\d+]/g,''))}` } : null,
+      item.website     ? { label: 'Website',     href: e(item.website) }            : null
+    ].filter(Boolean);
+    const photo = item.photo
+      ? `<img class="pcard__photo" src="${e(item.photo)}" alt="" loading="lazy" onerror="this.removeAttribute('src')" />`
+      : '';
+    container.innerHTML = `
+      <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px">
+        ${photo}
+        <div>
+          <p style="margin:0 0 2px;font-size:13px;color:var(--ink-soft)">${e(item.role || '')}${item.party ? ` · ${e(item.party)}` : ''}</p>
+          <span class="tag tag--level">${e(LEVEL[item.level] || item.level || '')}</span>
+        </div>
+      </div>
+      ${item.note ? `<p style="font-size:13px;color:var(--ink-soft);margin:0 0 10px">${e(item.note)}</p>` : ''}
+      <div class="detail-connections">${actions
+        .map(a => `<a class="detail-conn-tag" href="${a.href}" target="_blank" rel="noopener">${a.label}</a>`)
+        .join('')}</div>
+    `;
+    return;
+  }
+
+  // ── Connected topic ──
+  if (node.kind === 'topic') {
+    container.innerHTML = `
+      <p style="font-size:13.5px;color:var(--ink-soft);margin:0 0 8px">${e(item.why || '')}</p>
+      <p style="font-size:12.5px;font-style:italic;color:var(--ink-faint);margin:0 0 12px">${e(item.blurb || '')}</p>
+      <div class="detail-connections">
+        <button class="detail-conn-tag" type="button" data-add="${e(item.id)}"
+          style="cursor:pointer;border:0;background:var(--accent-soft);color:var(--accent)">
+          Add to my brief →
+        </button>
+      </div>
+    `;
+  }
 }
 
-function cardShell(item, className = '') {
-  const card = document.createElement('article');
-  card.className = `card ${className}`.trim();
-  card.id = `card-${item.id}`;
-  card.dataset.nodeId = item.id;
-  card.addEventListener('click', (event) => {
-    if (event.target.closest('a')) return;
-    focusItem(item.id);
-  });
-  card.addEventListener('mouseenter', () => {
-    state.hoveredId = item.id;
-    updateHighlight();
-  });
-  card.addEventListener('mouseleave', () => {
-    state.hoveredId = null;
-    updateHighlight();
-  });
-  return card;
+/* ── Panel section helper ── */
+
+function appendPanelSection(container, title, items, renderFn) {
+  const sec = document.createElement('div');
+  sec.className = 'panel-section';
+  const head = document.createElement('div');
+  head.className = 'panel-section__head';
+  head.innerHTML = `<span class="panel-section__title">${escapeHtml(title)}</span><span class="panel-section__count">${items.length}</span>`;
+  const cards = document.createElement('div');
+  cards.className = 'panel-section__cards';
+  for (const item of items) cards.append(renderFn(item));
+  sec.append(head, cards);
+  container.append(sec);
 }
 
-const sampleTag = (item) => (item.sample ? '<span class="tag tag--sample">Sample</span>' : '');
+/* ── Compact panel card renderers ── */
 
-function articleCard(article) {
-  const card = cardShell(article, 'card--article');
-  const when = article.publishedAt ? `${formatDate(article.publishedAt)} · ${relativeDays(article.publishedAt)}` : 'Undated';
+const sampleTag = (item) => item.sample ? '<span class="tag tag--sample">Sample</span>' : '';
+
+function panelArticle(article) {
+  const card = document.createElement('div');
+  card.className = 'pcard';
+  const when = article.publishedAt ? relativeDays(article.publishedAt) : null;
   card.innerHTML = `
-    <div class="card__kicker"><span>${escapeHtml(article.source)}</span>${sampleTag(article)}</div>
-    <h4 class="card__title"><a href="${escapeHtml(article.url)}" target="_blank" rel="noopener">${escapeHtml(article.title)}</a></h4>
-    <p class="card__summary">${escapeHtml(article.summary || '')}</p>
-    <div class="card__meta">${escapeHtml(when)}${article.author ? ` · ${escapeHtml(article.author)}` : ''}</div>
-    <a class="card__link" href="${escapeHtml(article.url)}" target="_blank" rel="noopener">Read →</a>`;
+    <div class="pcard__kicker">${escapeHtml(article.source)}${when ? ` · ${escapeHtml(when)}` : ''}${sampleTag(article)}</div>
+    <p class="pcard__title"><a href="${escapeHtml(article.url)}" target="_blank" rel="noopener">${escapeHtml(article.title)}</a></p>
+    ${article.summary ? `<p class="pcard__summary">${escapeHtml(article.summary)}</p>` : ''}
+    <a class="pcard__link" href="${escapeHtml(article.url)}" target="_blank" rel="noopener">Read →</a>`;
   return card;
 }
 
-function billCard(bill) {
-  const card = cardShell(bill, 'card--bill');
+function panelBill(bill) {
+  const card = document.createElement('div');
+  card.className = 'pcard';
   const stage = STAGE[bill.stage] || STAGE.introduced;
-  const meta = [bill.sponsor, bill.citation, bill.date ? formatDate(bill.date, { long: true }) : null].filter(Boolean).join(' · ');
   card.innerHTML = `
-    <div class="card__kicker">
-      ${bill.stage === 'sample' ? '' : `<span class="tag ${stage.cls}">${escapeHtml(stage.label)}</span>`}
+    <div class="pcard__kicker">
+      ${bill.stage !== 'sample' ? `<span class="tag ${stage.cls}">${escapeHtml(stage.label)}</span>` : ''}
       <span class="tag tag--level">${escapeHtml(LEVEL[bill.level] || bill.level)}</span>
       ${sampleTag(bill)}
     </div>
-    <h4 class="card__title">${bill.number && bill.number !== 'SAMPLE' ? `${escapeHtml(bill.number)} — ` : ''}${escapeHtml(bill.title)}</h4>
-    <p class="card__summary">${escapeHtml(bill.summary || '')}</p>
-    ${meta ? `<div class="card__meta">${escapeHtml(meta)}</div>` : ''}
-    ${bill.url ? `<a class="card__link" href="${escapeHtml(bill.url)}" target="_blank" rel="noopener">View bill →</a>` : ''}`;
+    <p class="pcard__title">${bill.number && bill.number !== 'SAMPLE' ? `${escapeHtml(bill.number)} — ` : ''}${escapeHtml(bill.title)}</p>
+    ${bill.summary ? `<p class="pcard__summary">${escapeHtml(bill.summary)}</p>` : ''}
+    ${bill.url ? `<a class="pcard__link" href="${escapeHtml(bill.url)}" target="_blank" rel="noopener">View bill →</a>` : ''}`;
   return card;
 }
 
-function personCard(person) {
-  const card = cardShell(person, 'card--person');
+function panelPerson(person) {
+  const card = document.createElement('div');
+  card.className = 'pcard pcard--person';
   const actions = [
-    person.email ? { label: 'Email', href: `mailto:${person.email}` } : null,
-    person.contactForm ? { label: 'Contact form', href: person.contactForm } : null,
-    person.phone ? { label: person.phone, href: `tel:${String(person.phone).replace(/[^\d+]/g, '')}` } : null,
-    person.website ? { label: 'Website', href: person.website } : null,
-    person.social?.twitter ? { label: 'Follow', href: `https://twitter.com/${person.social.twitter}` } : null
+    person.email       ? { label: 'Email',       href: `mailto:${person.email}` }  : null,
+    person.contactForm ? { label: 'Contact',     href: person.contactForm }         : null,
+    person.phone       ? { label: person.phone,  href: `tel:${String(person.phone).replace(/[^\d+]/g,'')}` } : null,
+    person.website     ? { label: 'Web',         href: person.website }             : null
   ].filter(Boolean);
-
   const photo = person.photo
-    ? `<img class="person__photo" src="${escapeHtml(person.photo)}" alt="" loading="lazy" onerror="this.removeAttribute('src')" />`
-    : '<div class="person__photo" aria-hidden="true"></div>';
-
+    ? `<img class="pcard__photo" src="${escapeHtml(person.photo)}" alt="" loading="lazy" onerror="this.removeAttribute('src')" />`
+    : '';
   card.innerHTML = `
     ${photo}
     <div>
-      <div class="card__kicker">
+      <div class="pcard__kicker">
         <span class="tag tag--level">${escapeHtml(LEVEL[person.level] || person.level)}</span>
         ${person.party ? `<span>${escapeHtml(person.party)}</span>` : ''}
         ${sampleTag(person)}
       </div>
-      <h4 class="person__name">${escapeHtml(person.name)}</h4>
-      <p class="person__role">${escapeHtml(person.role || '')}</p>
-      ${person.note ? `<p class="card__summary">${escapeHtml(person.note)}</p>` : ''}
-      <div class="person__actions">${actions
-        .map((a) => `<a class="person__action" href="${escapeHtml(a.href)}" target="_blank" rel="noopener">${escapeHtml(a.label)}</a>`)
+      <p class="pcard__title" style="margin-bottom:2px">${escapeHtml(person.name)}</p>
+      <p class="pcard__meta" style="margin-bottom:4px">${escapeHtml(person.role || '')}</p>
+      <div class="pcard__actions">${actions
+        .map(a => `<a class="pcard__action" href="${escapeHtml(a.href)}" target="_blank" rel="noopener">${escapeHtml(a.label)}</a>`)
         .join('')}</div>
     </div>`;
   return card;
 }
 
-function topicCard(topic) {
-  const card = cardShell({ ...topic, id: topic.id }, 'card--topic');
-  const via = state.brief.topics.find((t) => t.id === topic.via);
+function panelTopic(topic) {
+  const card = document.createElement('div');
+  card.className = 'pcard pcard--topic';
   card.innerHTML = `
-    <div class="card__kicker"><span>Connected to ${escapeHtml(via?.label || 'your topics')}</span></div>
-    <h4 class="card__title">${escapeHtml(topic.label)}</h4>
-    <p class="card__why">${escapeHtml(topic.why)}</p>
-    <p class="card__meta">${escapeHtml(topic.blurb)}</p>
-    <button class="card__link" type="button" data-add="${escapeHtml(topic.id)}" style="border:0;background:none;padding:0;cursor:pointer;color:var(--accent)">Add to my brief →</button>`;
-  card.querySelector('[data-add]').addEventListener('click', (event) => {
-    event.stopPropagation();
+    <p class="pcard__title">${escapeHtml(topic.label)}</p>
+    <p class="pcard__why">${escapeHtml(topic.why || '')}</p>
+    <button class="pcard__link" type="button" data-add="${escapeHtml(topic.id)}"
+      style="border:0;background:none;padding:0;cursor:pointer">
+      Add to my brief →
+    </button>`;
+  card.querySelector('[data-add]')?.addEventListener('click', (e) => {
+    e.stopPropagation();
     toggleTopic(topic.id, { run: true });
   });
   return card;
 }
 
-function focusItem(id) {
-  state.activeId = state.activeId === id ? null : id;
-  updateHighlight();
-  const target = document.getElementById(`card-${id}`) || document.getElementById(id);
-  if (target && state.activeId) {
-    const top = target.getBoundingClientRect().top + window.scrollY - 90;
-    window.scrollTo({ top: Math.max(top, 0), behavior: 'smooth' });
-  }
-}
+/* ─────────────── "Add to brief" from detail panel ─────────────── */
 
-function highlightCards() {
-  const active = state.hoveredId || state.activeId;
-  for (const card of els.feed.querySelectorAll('.card')) {
-    card.classList.toggle('is-active', card.dataset.nodeId === active);
+els.detailBody.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-add]');
+  if (btn) {
+    e.stopPropagation();
+    toggleTopic(btn.dataset.add, { run: true });
   }
-}
+});
 
-/* ---------------------------------- boot ---------------------------------- */
+/* ─────────────── Boot ─────────────── */
 
 async function boot() {
   els.mastheadDate.textContent = new Date().toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
   });
 
   readUrlState();
@@ -558,6 +637,8 @@ async function boot() {
   els.custom.hidden = state.preset !== 'custom';
   updateRangeNote();
 
+  initSpacingSlider();
+  initZoomSlider();
   els.form.addEventListener('submit', submit);
   els.preset.addEventListener('change', applyPreset);
   for (const input of [els.from, els.to]) {
