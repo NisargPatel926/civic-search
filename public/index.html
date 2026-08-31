@@ -12,8 +12,9 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📰</text></svg>" />
 </head>
 <body>
-<a class="skip-link" href="#brief">Skip to your brief</a>
+<a class="skip-link" href="#graph-stage">Skip to relationship map</a>
 
+<!-- ─────────────── Masthead ─────────────── -->
 <header class="masthead">
   <div class="masthead__rule masthead__rule--top"></div>
   <div class="masthead__inner">
@@ -32,9 +33,9 @@
 </header>
 
 <main>
+  <!-- ─────────────── Query bar ─────────────── -->
   <section class="query" aria-labelledby="query-heading">
     <h2 class="query__heading" id="query-heading">What do you want to track?</h2>
-
     <form id="query-form" class="query__form" autocomplete="off">
       <fieldset class="field field--topics">
         <legend class="field__label">Topics <span class="field__hint">choose up to five</span></legend>
@@ -44,14 +45,8 @@
       <div class="query__row">
         <div class="field field--address">
           <label class="field__label" for="address">Your address</label>
-          <input
-            class="input"
-            id="address"
-            name="address"
-            type="text"
-            placeholder="1200 Congress Ave, Austin, TX 78701"
-            spellcheck="false"
-          />
+          <input class="input" id="address" name="address" type="text"
+            placeholder="1200 Congress Ave, Austin, TX 78701" spellcheck="false" />
           <p class="field__note">Used once, to find your districts. Nothing is stored on the server.</p>
         </div>
 
@@ -83,6 +78,7 @@
     </form>
   </section>
 
+  <!-- ─────────────── Results ─────────────── -->
   <section class="results" id="brief" aria-live="polite">
     <div class="results__bar">
       <div class="results__title-group">
@@ -91,44 +87,86 @@
       </div>
       <div class="scopes" id="scope-tabs" role="tablist" aria-label="Level of government"></div>
     </div>
-    <p class="results__hint" id="scope-hint">The map and the columns below update together.</p>
-
     <div class="notices" id="notices" hidden></div>
 
-    <div class="layout">
-      <aside class="map-panel" aria-labelledby="map-heading">
-        <div class="panel">
-          <div class="panel__head">
-            <h3 class="panel__title" id="map-heading">Relationship map</h3>
-            <span class="panel__hint" id="map-hint">Hover to preview · click to pin</span>
-          </div>
+    <!-- ─── Graph row: canvas left, detail panel right ─── -->
+    <div class="graph-row" id="graph-row">
 
+      <!-- Graph stage -->
+      <div class="graph-stage" id="graph-stage" aria-label="Issue relationship map">
+        <!-- Toolbar overlaid on top-left of graph -->
+        <div class="graph-toolbar" id="graph-toolbar" aria-label="Graph controls">
+          <span class="graph-hint" id="graph-hint">Hover a node to preview · click to pin</span>
           <div class="focus-switch" id="focus-switch" hidden></div>
-
-          <div class="graph" id="graph">
-            <svg id="graph-svg" viewBox="0 0 760 640" role="img" aria-labelledby="graph-title">
-              <title id="graph-title">Map of your issues and the articles, bills, laws, and officials attached to them</title>
-              <defs>
-                <filter id="nodeShadow" x="-60%" y="-60%" width="220%" height="220%">
-                  <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#3b3323" flood-opacity="0.18" />
-                </filter>
-                <radialGradient id="coreGlow" cx="50%" cy="42%" r="72%">
-                  <stop offset="0%" stop-color="#9a3b26" />
-                  <stop offset="100%" stop-color="#6d2417" />
-                </radialGradient>
-              </defs>
-              <g id="graph-edges"></g>
-              <g id="graph-nodes"></g>
-            </svg>
-            <div class="graph__labels" id="graph-labels"></div>
-          </div>
-
-          <div class="legend" id="legend"></div>
         </div>
-      </aside>
 
-      <div class="feed" id="feed"></div>
+        <!-- The force-cloud canvas -->
+        <div class="graph-canvas" id="graph-canvas"></div>
+
+        <!-- Legend overlaid bottom-left -->
+        <div class="graph-legend" id="legend" role="list" aria-label="Map legend"></div>
+      </div>
+
+      <!-- Persistent detail panel -->
+      <div class="detail-panel" id="detail-panel" aria-label="Node detail">
+        <div class="detail-panel__inner">
+          <div class="detail-panel__head">
+            <p class="detail-panel__kind" id="detail-kind"></p>
+            <h3 class="detail-panel__title" id="detail-title"></h3>
+          </div>
+          <div class="detail-panel__body" id="detail-body">
+            <p class="detail-panel__empty">Hover over any node to preview its content here. Click a node to pin the detail.</p>
+          </div>
+          <div class="detail-panel__footer">
+            <span class="detail-panel__pin-hint" id="detail-pin-hint"></span>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /graph-row -->
+
+    <!-- Graph controls — spacing + zoom — lives below the graph, outside the canvas -->
+    <div class="graph-spacing-bar" id="graph-spacing-bar" hidden>
+      <!-- Spacing -->
+      <label class="spacing-bar__label" for="spacing-slider">
+        <svg class="spacing-bar__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="4" cy="8" r="2" fill="currentColor"/>
+          <circle cx="12" cy="8" r="3.2" fill="currentColor"/>
+          <line x1="6.2" y1="8" x2="8.6" y2="8" stroke="currentColor" stroke-width="1.2"/>
+        </svg>
+        Node spacing
+      </label>
+      <input
+        id="spacing-slider"
+        class="spacing-bar__slider"
+        type="range"
+        min="40" max="200" step="5" value="100"
+        aria-label="Adjust node spacing"
+      />
+      <span class="spacing-bar__value" id="spacing-value">100%</span>
+
+      <div class="spacing-bar__divider" aria-hidden="true"></div>
+
+      <!-- Zoom -->
+      <label class="spacing-bar__label" for="zoom-slider">
+        <svg class="spacing-bar__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="6.5" cy="6.5" r="4" stroke="currentColor" stroke-width="1.4"/>
+          <line x1="9.7" y1="9.7" x2="13.5" y2="13.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          <line x1="4.5" y1="6.5" x2="8.5" y2="6.5" stroke="currentColor" stroke-width="1.2"/>
+          <line x1="6.5" y1="4.5" x2="6.5" y2="8.5" stroke="currentColor" stroke-width="1.2"/>
+        </svg>
+        Zoom
+      </label>
+      <input
+        id="zoom-slider"
+        class="spacing-bar__slider"
+        type="range"
+        min="40" max="300" step="5" value="100"
+        aria-label="Adjust graph zoom"
+      />
+      <span class="spacing-bar__value" id="zoom-value">100%</span>
     </div>
+
   </section>
 </main>
 
@@ -143,16 +181,6 @@
   </p>
   <p class="footer__note">Rows marked <span class="tag tag--sample">Sample</span> are placeholders, not reporting. Verify anything before you act on it.</p>
 </footer>
-
-<template id="tpl-section">
-  <section class="feed__section">
-    <div class="feed__head">
-      <h3 class="feed__title"></h3>
-      <span class="feed__count"></span>
-    </div>
-    <div class="feed__cards"></div>
-  </section>
-</template>
 
 <script type="module" src="/js/app.js"></script>
 </body>
